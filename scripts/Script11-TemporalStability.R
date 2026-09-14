@@ -19,13 +19,14 @@
 # - todo el embarazo con el mismo modelo;
 # - número mínimo de pares por participante.
 #
-# Global:
-# logit(BC) ~ Delivery + cohort + Interval + GestWeek_mid +
-#   (1 | host_subject_id)
+# Global aditivo:
+# logit(BC) ~ Delivery + cohort + Interval + GestWeek_mid + (1 | host_subject_id)
+#
+# Global con interacción: 
+# logit(BC) ~ Delivery * cohort + Interval + GestWeek_mid + (1 | host_subject_id)
 #
 # Stanford/UAB:
-# logit(BC) ~ Delivery + Interval + GestWeek_mid +
-#   (1 | host_subject_id)
+# logit(BC) ~ Delivery + Interval + GestWeek_mid + (1 | host_subject_id)
 #
 # Los pares con Interval = 0 se conservan. Los pares consecutivos pueden
 # compartir una muestra; el intercepto aleatorio por participante no captura
@@ -371,7 +372,13 @@ make_pairs <- function(
 fit_pair_model <- function(
   pairs,
   analysis = "Global",
-  transformed = TRUE) {
+  transformed = TRUE,
+  global_model = c(
+    "additive",
+    "interaction")) {
+
+  global_model <- match.arg(
+    global_model)
 
   d <- pairs
 
@@ -396,9 +403,18 @@ fit_pair_model <- function(
 
   rhs <- if (
     analysis == "Global") {
-    paste(
-      "Delivery + cohort +",
-      "Interval + GestWeek_mid")
+
+    if (global_model ==
+      "additive") {
+      paste(
+        "Delivery + cohort +",
+        "Interval + GestWeek_mid")
+    } else {
+      paste(
+        "Delivery * cohort +",
+        "Interval + GestWeek_mid")
+    }
+
   } else {
     paste(
       "Delivery + Interval +",
@@ -582,12 +598,45 @@ save_diagnostic_plots <- function(
 extract_delivery <- function(
   model,
   dataset,
-  analysis) {
+  analysis,
+  global_model = c(
+    "additive",
+    "interaction")) {
+
+  global_model <- match.arg(
+    global_model)
 
   tt <- summary(
     model)$tTable
 
-  term <- "DeliveryPreterm"
+  if (analysis == "Global") {
+
+    if (global_model ==
+      "additive") {
+
+      term <- "DeliveryPreterm"
+      analysis_label <-
+        "Global_additive"
+      contrast_label <-
+        "Preterm_vs_Term_adjusted_for_cohort"
+
+    } else {
+
+      term <-
+        "DeliveryPreterm:cohortUAB"
+      analysis_label <-
+        "Global_interaction"
+      contrast_label <-
+        "Delivery_x_Cohort"
+    }
+
+  } else {
+
+    term <- "DeliveryPreterm"
+    analysis_label <- analysis
+    contrast_label <-
+      "Preterm_vs_Term"
+  }
 
   if (!term %in%
     rownames(tt))
@@ -597,7 +646,7 @@ extract_delivery <- function(
         term,
         "en",
         dataset,
-        analysis))
+        analysis_label))
 
   ci <- intervals(
     model,
@@ -605,9 +654,8 @@ extract_delivery <- function(
 
   data.frame(
     Dataset = dataset,
-    Analysis = analysis,
-    Contrast =
-      "Preterm_vs_Term",
+    Analysis = analysis_label,
+    Contrast = contrast_label,
     Beta =
       tt[
         term,
@@ -641,12 +689,19 @@ extract_delivery <- function(
     N_subjects =
       n_distinct(
         getData(model)$host_subject_id),
-    Direction = ifelse(
+    Direction = if (
+      analysis == "Global" &&
+        global_model ==
+          "interaction") {
+      NA_character_
+    } else if (
       tt[
         term,
-        "Value"] > 0,
-      "Higher_instability_in_Preterm",
-      "Higher_instability_in_Term"),
+        "Value"] > 0) {
+      "Higher_instability_in_Preterm"
+    } else {
+      "Higher_instability_in_Term"
+    },
     stringsAsFactors = FALSE)
 }
 
@@ -901,34 +956,82 @@ for (dataset in c(
         "Raw"
       }
 
-      model <- fit_pair_model(
-        pairs,
-        analysis,
-        transformed)
+      if (analysis == "Global") {
 
-      key <- paste(
-        dataset,
-        analysis,
-        scale_name,
-        sep = "_")
+        for (gm in c(
+          "additive",
+          "interaction")) {
 
-      diagnostic_models[[key]] <-
-        model
+          model <- fit_pair_model(
+            pairs,
+            analysis,
+            transformed,
+            global_model = gm)
 
-      diagnostic_results[[k]] <-
-        model_diagnostics(
+          analysis_label <- if (
+            gm == "additive") {
+            "Global_additive"
+          } else {
+            "Global_interaction"
+          }
+
+          key <- paste(
+            dataset,
+            analysis_label,
+            scale_name,
+            sep = "_")
+
+          diagnostic_models[[key]] <-
+            model
+
+          diagnostic_results[[k]] <-
+            model_diagnostics(
+              model,
+              dataset,
+              analysis_label,
+              scale_name)
+
+          save_diagnostic_plots(
+            model,
+            dataset,
+            analysis_label,
+            scale_name)
+
+          k <- k + 1
+        }
+
+      } else {
+
+        model <- fit_pair_model(
+          pairs,
+          analysis,
+          transformed,
+          global_model = "additive")
+
+        key <- paste(
+          dataset,
+          analysis,
+          scale_name,
+          sep = "_")
+
+        diagnostic_models[[key]] <-
+          model
+
+        diagnostic_results[[k]] <-
+          model_diagnostics(
+            model,
+            dataset,
+            analysis,
+            scale_name)
+
+        save_diagnostic_plots(
           model,
           dataset,
           analysis,
           scale_name)
 
-      save_diagnostic_plots(
-        model,
-        dataset,
-        analysis,
-        scale_name)
-
-      k <- k + 1
+        k <- k + 1
+      }
     }
   }
 }
@@ -945,9 +1048,12 @@ print(
 ###############################################################################
 
 Primary_Models <- list(
-  Global =
+  Global_additive =
     diagnostic_models[[
-      "Window_15_33_Global_Logit_varExp"]],
+      "Window_15_33_Global_additive_Logit_varExp"]],
+  Global_interaction =
+    diagnostic_models[[
+      "Window_15_33_Global_interaction_Logit_varExp"]],
   Stanford =
     diagnostic_models[[
       "Window_15_33_Stanford_Logit_varExp"]],
@@ -956,13 +1062,26 @@ Primary_Models <- list(
       "Window_15_33_UAB_Logit_varExp"]])
 
 Primary_Results <- bind_rows(
-  lapply(
-    names(Primary_Models),
-    function(a)
-      extract_delivery(
-        Primary_Models[[a]],
-        "Window_15_33",
-        a))) %>%
+  extract_delivery(
+    Primary_Models$Global_additive,
+    "Window_15_33",
+    "Global",
+    global_model = "additive"),
+  extract_delivery(
+    Primary_Models$Global_interaction,
+    "Window_15_33",
+    "Global",
+    global_model = "interaction"),
+  extract_delivery(
+    Primary_Models$Stanford,
+    "Window_15_33",
+    "Stanford",
+    global_model = "additive"),
+  extract_delivery(
+    Primary_Models$UAB,
+    "Window_15_33",
+    "UAB",
+    global_model = "additive")) %>%
   mutate(
     Significant =
       Pvalue < 0.05)
@@ -978,9 +1097,12 @@ print(
 ###############################################################################
 
 Full_Models <- list(
-  Global =
+  Global_additive =
     diagnostic_models[[
-      "Full_pregnancy_Global_Logit_varExp"]],
+      "Full_pregnancy_Global_additive_Logit_varExp"]],
+  Global_interaction =
+    diagnostic_models[[
+      "Full_pregnancy_Global_interaction_Logit_varExp"]],
   Stanford =
     diagnostic_models[[
       "Full_pregnancy_Stanford_Logit_varExp"]],
@@ -989,13 +1111,26 @@ Full_Models <- list(
       "Full_pregnancy_UAB_Logit_varExp"]])
 
 FullPregnancy_Results <- bind_rows(
-  lapply(
-    names(Full_Models),
-    function(a)
-      extract_delivery(
-        Full_Models[[a]],
-        "Full_pregnancy",
-        a))) %>%
+  extract_delivery(
+    Full_Models$Global_additive,
+    "Full_pregnancy",
+    "Global",
+    global_model = "additive"),
+  extract_delivery(
+    Full_Models$Global_interaction,
+    "Full_pregnancy",
+    "Global",
+    global_model = "interaction"),
+  extract_delivery(
+    Full_Models$Stanford,
+    "Full_pregnancy",
+    "Stanford",
+    global_model = "additive"),
+  extract_delivery(
+    Full_Models$UAB,
+    "Full_pregnancy",
+    "UAB",
+    global_model = "additive")) %>%
   mutate(
     Significant =
       Pvalue < 0.05)
@@ -1112,12 +1247,14 @@ min_pairs_sensitivity <- function(
         model <- fit_pair_model(
           d,
           analysis,
-          TRUE)
+          TRUE,
+          global_model = "additive")
 
         res <- extract_delivery(
           model,
           dataset,
-          analysis)
+          analysis,
+          global_model = "additive")
 
         res$Min_pairs <-
           min_pairs
