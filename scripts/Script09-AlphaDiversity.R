@@ -13,14 +13,14 @@
 # - Ventana gestacional: 15-33 semanas.
 # - Shannon: log1p(Shannon).
 # - Gini-Simpson: 1-D sin transformar, como análisis complementario.
-# - Global:
-#   índice ~ Delivery * cohort + GestWeek + log(profundidad).
-# - Stanford/UAB:
-#   índice ~ Delivery + GestWeek + log(profundidad).
+# - Global aditivo: índice ~ Delivery + cohort + GestWeek + log(profundidad).
+# - Global con interacción: índice ~ Delivery * cohort + GestWeek + log(profundidad).
+# - Stanford/UAB: índice ~ Delivery + GestWeek + log(profundidad).
 # - Intercepto aleatorio por participante mediante nlme::lme().
 #
 # Sensibilidades:
-# - ajuste adicional por edad materna;
+# - ajuste adicional por edad materna, repitiendo los modelos globales
+#   aditivo y con interacción, además de Stanford/UAB;
 # - promedio por participante dentro de la ventana 15-33 semanas.
 #
 # Potencia/MDE:
@@ -587,7 +587,13 @@ fit_lmm <- function(
   dat,
   index,
   analysis,
+  global_model = c(
+    "interaction",
+    "additive"),
   age_adjusted = FALSE) {
+
+  global_model <- match.arg(
+    global_model)
 
   response <- if (
     index == "Shannon") {
@@ -618,8 +624,17 @@ fit_lmm <- function(
 
   if (analysis == "Global") {
 
+    exposure_terms <- if (
+      global_model ==
+        "additive") {
+      "Delivery + cohort"
+    } else {
+      "Delivery * cohort"
+    }
+
     rhs <- paste0(
-      "Delivery * cohort + GestWeek + ",
+      exposure_terms,
+      " + GestWeek + ",
       "Log_Sequencing_Depth",
       age_term)
 
@@ -659,16 +674,44 @@ extract_main_effect <- function(
   model,
   index,
   analysis,
-  adjustment) {
+  adjustment,
+  global_model = c(
+    "interaction",
+    "additive")) {
+
+  global_model <- match.arg(
+    global_model)
 
   tt <- summary(
     model)$tTable
 
-  term <- if (
-    analysis == "Global") {
-    "DeliveryPreterm:cohortUAB"
+  if (analysis == "Global") {
+
+    if (global_model ==
+      "additive") {
+
+      term <- "DeliveryPreterm"
+      analysis_label <-
+        "Global_additive"
+      contrast_label <-
+        "Preterm_vs_Term_adjusted_for_cohort"
+
+    } else {
+
+      term <-
+        "DeliveryPreterm:cohortUAB"
+      analysis_label <-
+        "Global_interaction"
+      contrast_label <-
+        "Delivery_x_Cohort"
+    }
+
   } else {
-    "DeliveryPreterm"
+
+    term <- "DeliveryPreterm"
+    analysis_label <- analysis
+    contrast_label <-
+      "Preterm_vs_Term"
   }
 
   if (!term %in%
@@ -678,7 +721,7 @@ extract_main_effect <- function(
         "No se encontró",
         term,
         "en",
-        analysis,
+        analysis_label,
         index))
 
   ci <- intervals(
@@ -688,13 +731,10 @@ extract_main_effect <- function(
       ]
 
   data.frame(
-    Analysis = analysis,
+    Analysis = analysis_label,
     Index = index,
     Adjustment = adjustment,
-    Contrast = ifelse(
-      analysis == "Global",
-      "Delivery_x_Cohort",
-      "Preterm_vs_Term"),
+    Contrast = contrast_label,
     Beta =
       tt[
         term,
@@ -720,7 +760,9 @@ extract_main_effect <- function(
     CI_high =
       ci["upper"],
     Direction = if (
-      analysis == "Global") {
+      analysis == "Global" &&
+        global_model ==
+          "interaction") {
       NA_character_
     } else if (
       tt[
@@ -892,12 +934,70 @@ j <- 1
 
 for (idx in indices) {
 
-  for (a in analyses) {
+  # Modelo global aditivo:
+  # efecto de Delivery ajustado por cohorte.
+  fit_add <- fit_lmm(
+    alpha_window,
+    idx,
+    "Global",
+    global_model = "additive",
+    age_adjusted = FALSE)
+
+  primary_results[[k]] <-
+    extract_main_effect(
+      fit_add$model,
+      idx,
+      "Global",
+      "Primary",
+      global_model = "additive")
+
+  primary_diagnostics[[j]] <-
+    save_diagnostics(
+      fit_add$model,
+      idx,
+      "Global_additive",
+      "Primary")
+
+  k <- k + 1
+  j <- j + 1
+
+  # Modelo global con interacción:
+  # evalúa si la asociación Delivery-diversidad difiere por cohorte.
+  fit_int <- fit_lmm(
+    alpha_window,
+    idx,
+    "Global",
+    global_model = "interaction",
+    age_adjusted = FALSE)
+
+  primary_results[[k]] <-
+    extract_main_effect(
+      fit_int$model,
+      idx,
+      "Global",
+      "Primary",
+      global_model = "interaction")
+
+  primary_diagnostics[[j]] <-
+    save_diagnostics(
+      fit_int$model,
+      idx,
+      "Global_interaction",
+      "Primary")
+
+  k <- k + 1
+  j <- j + 1
+
+  # Modelos estratificados por cohorte.
+  for (a in c(
+    "Stanford",
+    "UAB")) {
 
     fit <- fit_lmm(
       alpha_window,
       idx,
       a,
+      global_model = "interaction",
       age_adjusted = FALSE)
 
     primary_results[[k]] <-
@@ -905,7 +1005,9 @@ for (idx in indices) {
         fit$model,
         idx,
         a,
-        "Primary")
+        "Primary",
+        global_model =
+          "interaction")
 
     primary_diagnostics[[j]] <-
       save_diagnostics(
@@ -935,8 +1037,9 @@ print(Primary_Results)
 # 8. Potencia y MDE para Shannon
 ###############################################################################
 
-# Global corresponde al término de interacción del modelo global.
+# El MDE global continúa dirigido al término de interacción del modelo global.
 # Stanford/UAB corresponden a DeliveryPreterm en los modelos estratificados.
+# El nuevo modelo global aditivo no modifica esta pregunta de potencia.
 
 fit_mde_base <- function(
   dat,
@@ -1300,12 +1403,68 @@ j <- 1
 
 for (idx in indices) {
 
-  for (a in analyses) {
+  # Global aditivo + edad materna.
+  fit_add_age <- fit_lmm(
+    alpha_window,
+    idx,
+    "Global",
+    global_model = "additive",
+    age_adjusted = TRUE)
+
+  age_results[[k]] <-
+    extract_main_effect(
+      fit_add_age$model,
+      idx,
+      "Global",
+      "Age_adjusted",
+      global_model = "additive")
+
+  age_diagnostics[[j]] <-
+    save_diagnostics(
+      fit_add_age$model,
+      idx,
+      "Global_additive",
+      "Age_adjusted")
+
+  k <- k + 1
+  j <- j + 1
+
+  # Global con interacción + edad materna.
+  fit_int_age <- fit_lmm(
+    alpha_window,
+    idx,
+    "Global",
+    global_model = "interaction",
+    age_adjusted = TRUE)
+
+  age_results[[k]] <-
+    extract_main_effect(
+      fit_int_age$model,
+      idx,
+      "Global",
+      "Age_adjusted",
+      global_model = "interaction")
+
+  age_diagnostics[[j]] <-
+    save_diagnostics(
+      fit_int_age$model,
+      idx,
+      "Global_interaction",
+      "Age_adjusted")
+
+  k <- k + 1
+  j <- j + 1
+
+  # Modelos estratificados + edad materna.
+  for (a in c(
+    "Stanford",
+    "UAB")) {
 
     fit <- fit_lmm(
       alpha_window,
       idx,
       a,
+      global_model = "interaction",
       age_adjusted = TRUE)
 
     age_results[[k]] <-
@@ -1313,7 +1472,9 @@ for (idx in indices) {
         fit$model,
         idx,
         a,
-        "Age_adjusted")
+        "Age_adjusted",
+        global_model =
+          "interaction")
 
     age_diagnostics[[j]] <-
       save_diagnostics(
@@ -1444,7 +1605,10 @@ extract_subject_effect <- function(
     level = .95)
 
   data.frame(
-    Analysis = analysis,
+    Analysis = ifelse(
+      analysis == "Global",
+      "Global_interaction",
+      analysis),
     Index = index,
     Adjustment =
       "Participant_mean",
