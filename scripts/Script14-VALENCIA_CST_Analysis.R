@@ -10,13 +10,15 @@
 # Análisis principal:
 # - ventana gestacional común de 15-33 semanas;
 # - modelos logísticos mixtos one-vs-rest para cada CST con prevalencia >=5 %;
-# - análisis global y estratificado por Stanford/UAB;
+# - modelos globales aditivo y con interacción Delivery * cohort;
+# - análisis estratificado por Stanford/UAB;
 # - ajuste por semana gestacional;
 # - FDR BH dentro de cada bloque Global / Stanford / UAB.
 #
 # Dinámica temporal:
 # - pares de muestras consecutivas de una misma participante;
 # - cambio de CST (sí/no) como respuesta;
+# - modelos globales aditivo y con interacción Delivery * cohort;
 # - ajuste por intervalo entre muestras y semana gestacional media del par.
 #
 # Sensibilidades:
@@ -66,7 +68,8 @@ SCORE_CUT <- 0.1
 ALPHA <- 0.05
 
 analyses <- c(
-  "Global",
+  "Global_additive",
+  "Global_interaction",
   "Stanford",
   "UAB")
 
@@ -649,11 +652,19 @@ fit_cst_model <- function(
     return(NULL)
 
   formula_model <- if (
-    analysis == "Global") {
+    analysis == "Global_additive") {
 
     CST_present ~
       Delivery +
       cohort +
+      GestWeek_z +
+      (1|host_subject_id)
+
+  } else if (
+    analysis == "Global_interaction") {
+
+    CST_present ~
+      Delivery * cohort +
       GestWeek_z +
       (1|host_subject_id)
 
@@ -701,7 +712,12 @@ extract_cst_effect <- function(
   tt <- summary(
     fit$model)$coefficients
 
-  term <- "DeliveryPreterm"
+  term <- if (
+    analysis == "Global_interaction") {
+    "DeliveryPreterm:cohortUAB"
+  } else {
+    "DeliveryPreterm"
+  }
 
   if (!term %in%
     rownames(tt))
@@ -741,10 +757,18 @@ extract_cst_effect <- function(
         beta +
           1.96 * se),
     Pvalue_raw = p,
-    Direction = ifelse(
-      beta > 0,
-      "Higher_odds_in_Preterm",
-      "Lower_odds_in_Preterm"),
+    Direction = if (
+      analysis == "Global_interaction") {
+      ifelse(
+        beta > 0,
+        "Stronger_Preterm_association_in_UAB",
+        "Weaker_Preterm_association_in_UAB")
+    } else {
+      ifelse(
+        beta > 0,
+        "Higher_odds_in_Preterm",
+        "Lower_odds_in_Preterm")
+    },
     stringsAsFactors = FALSE)
 }
 
@@ -1064,11 +1088,20 @@ fit_transition_model <- function(
   d <- droplevels(d)
 
   formula_model <- if (
-    analysis == "Global") {
+    analysis == "Global_additive") {
 
     CST_change ~
       Delivery +
       cohort +
+      Interval_z +
+      GestWeek_mid_z +
+      (1|host_subject_id)
+
+  } else if (
+    analysis == "Global_interaction") {
+
+    CST_change ~
+      Delivery * cohort +
       Interval_z +
       GestWeek_mid_z +
       (1|host_subject_id)
@@ -1106,7 +1139,12 @@ extract_transition_effect <- function(
   tt <- summary(
     model)$coefficients
 
-  term <- "DeliveryPreterm"
+  term <- if (
+    analysis == "Global_interaction") {
+    "DeliveryPreterm:cohortUAB"
+  } else {
+    "DeliveryPreterm"
+  }
 
   if (!term %in%
     rownames(tt))
@@ -1145,10 +1183,18 @@ extract_transition_effect <- function(
         getME(
           model,
           "flist")[[1]]),
-    Direction = ifelse(
-      beta > 0,
-      "More_transitions_in_Preterm",
-      "Fewer_transitions_in_Preterm"),
+    Direction = if (
+      analysis == "Global_interaction") {
+      ifelse(
+        beta > 0,
+        "Stronger_Preterm_transition_association_in_UAB",
+        "Weaker_Preterm_transition_association_in_UAB")
+    } else {
+      ifelse(
+        beta > 0,
+        "More_transitions_in_Preterm",
+        "Fewer_transitions_in_Preterm")
+    },
     stringsAsFactors = FALSE)
 }
 
