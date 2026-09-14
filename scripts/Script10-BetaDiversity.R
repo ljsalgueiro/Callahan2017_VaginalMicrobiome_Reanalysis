@@ -15,7 +15,8 @@
 # - global aditivo: cohort + Delivery, efectos marginales;
 # - global con interacción: cohort * Delivery, reportando la interacción;
 # - Stanford/UAB: Delivery por separado;
-# - sensibilidad por edad materna;
+# - sensibilidad por edad materna, repitiendo los modelos globales aditivo
+#   y con interacción, además de Stanford/UAB;
 # - BETADISPER y Tukey cuando procede.
 #
 # Sensibilidad longitudinal:
@@ -270,11 +271,11 @@ meta_subj <- meta_win %>%
     host_subject_id) %>%
   summarise(
     cohort =
-      first(cohort),
+      dplyr::first(cohort),
     Delivery =
-      first(Delivery),
+      dplyr::first(Delivery),
     AGE =
-      first(AGE),
+      dplyr::first(AGE),
     N_samples = n(),
     GestWeek_mean =
       mean(GestWeek),
@@ -408,19 +409,38 @@ meta_age <- droplevels(
     ,
     drop = FALSE])
 
+# Modelo global aditivo + edad:
+# efecto marginal de Delivery ajustado por cohort y AGE.
 set.seed(SEED)
 
-pm_age <- adonis2(
+pm_age_add <- adonis2(
   D_age ~ cohort + AGE + Delivery,
   data = meta_age,
   permutations = NPERM,
   by = "margin")
 
 cat(
-  "\n--- PERMANOVA global ajustada por edad ---\n")
+  "\n--- PERMANOVA global aditiva ajustada por edad ---\n")
 
-print(pm_age)
+print(pm_age_add)
 
+# Modelo global con interacción + edad:
+# evalúa si la asociación de Delivery difiere entre cohortes
+# después de ajustar por AGE.
+set.seed(SEED)
+
+pm_age_inter <- adonis2(
+  D_age ~ cohort + Delivery + AGE + cohort:Delivery,
+  data = meta_age,
+  permutations = NPERM,
+  by = "terms")
+
+cat(
+  "\n--- PERMANOVA global con interacción ajustada por edad ---\n")
+
+print(pm_age_inter)
+
+# Modelos estratificados por cohorte + edad.
 pm_age_strat <- list()
 
 for (co in levels(
@@ -1569,12 +1589,16 @@ permanova_tab <- bind_rows(
     "UAB",
     "Delivery"),
   tidy_adonis(
-    pm_age,
-    "Global ajustado por edad",
+    pm_age_add,
+    "Global aditivo ajustado por edad",
     c(
       "cohort",
       "AGE",
       "Delivery")),
+  tidy_adonis(
+    pm_age_inter,
+    "Global interaccion ajustado por edad",
+    "cohort:Delivery"),
   tidy_adonis(
     pm_age_strat[["Stanford"]],
     "Stanford ajustado por edad",
