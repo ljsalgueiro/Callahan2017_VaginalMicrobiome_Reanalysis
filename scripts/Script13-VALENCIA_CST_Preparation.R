@@ -22,6 +22,32 @@
 # El script no calcula los CST en R. Genera VALENCIA_input.csv para ejecutar
 # Valencia.py en Python. Si el output ya existe, crea ps_valencia.rds.
 
+# ============================================================
+# VALENCIA reproducibility information
+# ============================================================
+#
+# VALENCIA repository:
+# https://github.com/ravel-lab/VALENCIA
+#
+# VALENCIA commit:
+# 8559d454387479f7155333693d854961463c3b15
+#
+# Valencia.py MD5:
+# 46f695e12331be15ad303602ab9fbf7e
+#
+# Reference centroids:
+# CST_centroids_012920.csv
+#
+# Centroids MD5:
+# 40029ff8c590f919a8506ad3bff4269f
+#
+# Execution environment:
+# Ubuntu 20.04.6 LTS
+# Python 3.8.10
+# pandas 2.0.3
+# numpy 1.24.4
+# ============================================================
+
 ###############################################################################
 
 rm(list = ls())
